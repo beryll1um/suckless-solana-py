@@ -1,0 +1,17 @@
+# Copyright (c) 2025 The Suckless Solana Python developers
+# Distributed under the MIT software license, see the accompanying
+# file COPYING or https://opensource.org/license/mit/.
+
+[build-system]
+requires = ["setuptools==76.0.0", "wheel==0.45.1"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "suckless-solana-py"
+version = "0.1.0"
+description = "Less sucking implementation of the Python Solana library."
+readme = "README"
+requires-python = ">=3.13.1"
+authors = [{name = "Vitalii", email = "vitalii.babichuk@proton.me"}]
+dependencies = ["websockets==14.2", "pydantic==2.10.6"]
+
