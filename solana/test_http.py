@@ -9,7 +9,7 @@ import pytest
 from .http import RpcClient
 
 # Types used for Solana RPC HTTP `getTransaction` arguments.
-from . import transaction
+from . import block, transaction
 
 
 @pytest.mark.asyncio
@@ -23,7 +23,7 @@ async def test_get_transaction() -> None:
     tx = await cli.get_transaction(
         "5Pj5fCupXLUePYn18JkY8SrRaWFiUctuDTRwvUy2ML9y"
         "vkENLb1QMYbcBGcBXRrSVDjp7RjUwk9a3rLC6gpvtYpZ",
-        commitment=transaction.Finalized
+        commitment=block.Commitment.FINALIZED
     )
     # On success, the response should contain dict in result field.
     assert isinstance(tx.result, dict)

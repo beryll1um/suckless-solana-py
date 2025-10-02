@@ -11,14 +11,7 @@ Type representing criteria for the logs to receive results.
 
 All = Filter("all")
 """
-Constant representing subscription to all transactions
-except for simple vote transactions.
-"""
-
-AllWithVotes = Filter("allWithVotes")
-"""
-Constant representing subscribtion to all transactions,
-including simple vote transactions.
+Constant representing subscription to all transactions in block.
 """
 
 Mention = NewType("Mention", str)

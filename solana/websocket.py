@@ -9,7 +9,9 @@ import websockets
 from typing import Any, Callable, Coroutine
 from json import JSONDecoder, JSONDecodeError
 
-from . import error, jsonrpc20, logssubscribe, transaction
+from . import (
+    block, error, jsonrpc20, blocksubscribe, logssubscribe, transaction
+)
 
 DEFAULT_CLIENT_LOGGER_NAME = "solana-websocket"
 
@@ -274,7 +276,7 @@ class RpcClient(Client):
     async def logs_subscribe(
         self,
         mentions_or_filter: list[logssubscribe.Mention] | logssubscribe.Filter,
-        commitment: transaction.Commitment
+        commitment: block.Commitment
     ) -> jsonrpc20.Response:
         """
         Subscribe to transaction logs.
@@ -296,6 +298,67 @@ class RpcClient(Client):
         """
         return await self._send_request(jsonrpc20.Request(
             method="logsUnsubscribe",
+            params=[subscription],
+            id=self._next_seq()
+        ))
+
+    async def block_subscribe(
+        self,
+        mentions_or_filter:
+            list[blocksubscribe.Mention] | blocksubscribe.Filter,
+        commitment: block.Commitment,
+        encoding: block.Encoding = block.Encoding.JSON,
+        transaction_details: block.Details = block.Details.FULL,
+        rewards: bool = False
+    ) -> jsonrpc20.Response:
+        """
+        Subscribe to block logs.
+        """
+        return await self._send_request(jsonrpc20.Request(
+            method="blockSubscribe",
+            params=[
+                {"mentionsAccountOrProgram": mentions_or_filter}
+                if isinstance(mentions_or_filter, list)
+                else mentions_or_filter,
+                {
+                    # The commitment describes how finalized a block
+                    # is at that point in time.
+                    "commitment": commitment,
+                    "encoding": encoding,
+                    "transactionDetails": transaction_details,
+                    "showRewards": rewards
+                }
+            ],
+            id=self._next_seq()
+        ))
+
+    async def block_unsubscribe(self, subscription: int) -> jsonrpc20.Response:
+        """
+        Unsubscribe from block notifications.
+        """
+        return await self._send_request(jsonrpc20.Request(
+            method="blockUnsubscribe",
+            params=[subscription],
+            id=self._next_seq()
+        ))
+
+    async def slot_subscribe(self) -> jsonrpc20.Response:
+        """
+        Subscribe to receive notification anytime a slot is processed
+        by the validator.
+        """
+        return await self._send_request(jsonrpc20.Request(
+            method="slotSubscribe",
+            id=self._next_seq()
+        ))
+
+    async def slot_unsubscribe(self, subscription: int) -> jsonrpc20.Response:
+        """
+        Subscribe to receive notification anytime a slot is processed
+        by the validator.
+        """
+        return await self._send_request(jsonrpc20.Request(
+            method="slotUnsubscribe",
             params=[subscription],
             id=self._next_seq()
         ))

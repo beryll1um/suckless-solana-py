@@ -12,7 +12,7 @@ from .websocket import Client, RpcClient, RpcDispatcher
 from asyncio import Event, sleep
 
 # Types used for Solana RPC WebSocket `logsSubscribe` arguments.
-from . import logssubscribe, transaction
+from . import block, transaction, logssubscribe
 
 
 @pytest.mark.asyncio
@@ -44,7 +44,7 @@ async def test_logs_subscribe_unsubscribe() -> None:
     # Subscribe to account logs and await the response.
     resp = await rpc.logs_subscribe(
         [logssubscribe.Mention("11111111111111111111111111111111")],
-        transaction.Processed
+        block.Commitment.PROCESSED
     )
     # On success, the response should contain a subscription ID (int).
     assert isinstance(resp.result, int)
@@ -80,7 +80,7 @@ async def test_set_unset_notification_handler() -> None:
     # Subscribe to account logs and await the response.
     resp = await disp.logs_subscribe(
         [logssubscribe.Mention("11111111111111111111111111111111")],
-        transaction.Processed
+        block.Commitment.PROCESSED
     )
     # On success, the response should contain a subscription ID (int).
     assert isinstance(resp.result, int)

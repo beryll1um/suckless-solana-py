@@ -6,7 +6,7 @@ import httpx
 
 from functools import cached_property
 
-from . import error, transaction, logssubscribe, jsonrpc20
+from . import block, error, transaction, logssubscribe, jsonrpc20
 
 
 class Client[T]:
@@ -93,8 +93,8 @@ class RpcClient(Client["RpcClient"]):
     async def get_transaction(
         self,
         signature: str,
-        commitment: transaction.Commitment,
-        encoding: transaction.Encoding = transaction.JSON
+        commitment: block.Commitment,
+        encoding: transaction.Encoding = transaction.Encoding.JSON
     ) -> jsonrpc20.Response:
         """
         Returns transaction details for a confirmed transaction
@@ -108,6 +108,34 @@ class RpcClient(Client["RpcClient"]):
                 # Currently, the only valid value for this parameter is 0.
                 "maxSupportedTransactionVersion": 0,
                 "encoding": encoding
+            }],
+            # Because only one request at a time can be constant.
+            id="1"
+        ))
+
+    async def get_block(
+        self,
+        slot: int,
+        commitment: block.Commitment,
+        encoding: transaction.Encoding = transaction.Encoding.JSON,
+        transaction_details: block.Details = block.Details.FULL,
+        rewards: bool = False
+    ) -> jsonrpc20.Response:
+        """
+        Returns identity and transaction information about
+        block in the ledger.
+        """
+        return await self._send_request(jsonrpc20.Request(
+            method="getBlock",
+            params=[slot, {
+                # The commitment describes how finalized a block
+                # is at that point in time.
+                "commitment": commitment,
+                "encoding": encoding,
+                "transactionDetails": transaction_details,
+                # Currently, the only valid value for this parameter is 0.
+                "maxSupportedTransactionVersion": 0,
+                "rewards": rewards
             }],
             # Because only one request at a time can be constant.
             id="1"

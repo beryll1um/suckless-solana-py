@@ -34,6 +34,7 @@ class Request(Base):
 
     # Optional parameters for the method invocation.
     params: dict[str, Any] | list[Any] | None = pydantic.Field(
+        default=None,
         description="Arguments to be passed to the invoked method"
     )
 
