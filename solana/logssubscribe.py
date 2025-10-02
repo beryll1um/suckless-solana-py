@@ -4,19 +4,26 @@
 
 from typing import NewType
 
+Filter = NewType("Filter", str)
+"""
+Type representing criteria for the logs to receive results.
+"""
+
+All = Filter("all")
+"""
+Constant representing subscribtion to all transactions
+except for simple vote transactions.
+"""
+
+AllWithVotes = Filter("allWithVotes")
+"""
+Constant representing subscribtion to all transactions,
+including simple vote transactions.
+"""
+
 Mention = NewType("Mention", str)
 """
 Type representing an account public key (Base58-encoded string).
-"""
-
-Commitment = NewType("Commitment", str)
-"""
-Type representing the commitment level of a transaction.
-"""
-
-Processed = Commitment("processed")
-"""
-Constant representing the most recent node block (which may be incomplete).
 """
 
 # vim: set ts=4 sw=4 expandtab:

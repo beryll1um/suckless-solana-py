@@ -8,10 +8,10 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "suckless-solana-py"
-version = "0.1.0"
+version = "0.1.1"
 description = "Less sucking implementation of the Python Solana library."
 readme = "README"
 requires-python = ">=3.13.1"
 authors = [{name = "Vitalii", email = "vitalii.babichuk@proton.me"}]
-dependencies = ["websockets==14.2", "pydantic==2.10.6"]
+dependencies = ["websockets==14.2", "pydantic", "httpx==0.28.1"]
 

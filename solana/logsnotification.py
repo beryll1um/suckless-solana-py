@@ -2,68 +2,68 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit/.
 
-from pydantic import BaseModel as PydanticBaseModel, Field
+import pydantic
 
 
-class Context(PydanticBaseModel):
+class Context(pydantic.BaseModel):
     """
     Represents the context of the `logSubscribe` RPC method result.
     """
     # Slot number from the "logsNotification" result context.
-    slot: int | None = Field(
+    slot: int | None = pydantic.Field(
         default=None,
         description="Optional slot number in the context"
     )
 
 
-class Value(PydanticBaseModel):
+class Value(pydantic.BaseModel):
     """
     Represents the value of the `logSubscribe` RPC method result.
     """
     # Transaction signature from the "logsNotification" result value.
-    signature: str = Field(
+    signature: str = pydantic.Field(
         description="Transaction signature as a string"
     )
 
     # Optional error details from the "logsNotification" result value.
-    err: dict | None = Field(
+    err: dict | None = pydantic.Field(
         default=None,
         description="Optional error details if present"
     )
 
     # Log messages from the "logsNotification" result value.
-    logs: tuple[str, ...] | None = Field(
+    logs: tuple[str, ...] | None = pydantic.Field(
         default=None,
         description="Optional tuple of log message strings"
     )
 
 
-class Result(PydanticBaseModel):
+class Result(pydantic.BaseModel):
     """
     Represents the result of the `logSubscribe` RPC method.
     """
     # Context of the "logsNotification" result.
-    context: Context = Field(
+    context: Context = pydantic.Field(
         description="Context object of the log subscription"
     )
 
     # Value of the "logsNotification" result.
-    value: Value = Field(
+    value: Value = pydantic.Field(
         description="Value object of the log subscription"
     )
 
 
-class Params(PydanticBaseModel):
+class Params(pydantic.BaseModel):
     """
     Represents the parameters of the `logSubscribe` RPC method.
     """
     # Result object of the "logsNotification" parameters.
-    result: Result = Field(
+    result: Result = pydantic.Field(
         description="Result object of the 'logsNotification' parameters"
     )
 
     # Identifier used to track messages or unsubscribe.
-    subscription: int = Field(
+    subscription: int = pydantic.Field(
         description="Subscription identifier used for tracking "
                     "and unsubscribing"
     )

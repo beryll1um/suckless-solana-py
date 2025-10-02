@@ -9,7 +9,7 @@ import websockets
 from typing import Any, Callable, Coroutine
 from json import JSONDecoder, JSONDecodeError
 
-from . import jsonrpc20, logssubscribe
+from . import error, jsonrpc20, logssubscribe, transaction
 
 DEFAULT_CLIENT_LOGGER_NAME = "solana-websocket"
 
@@ -120,18 +120,6 @@ class Client:
             raise ClientError("Failed to finalize connection.") from e
 
 
-class RpcClientError(Exception):
-    """
-    Exception for Solana RPC WebSocket Client-related errors.
-    """
-
-    def __init__(self, msg: str, **kwds) -> None:
-        """
-        Initialize with an error message.
-        """
-        super().__init__(msg, **kwds)
-
-
 class RpcClient(Client):
     """
     Implementation of the Solana RPC WebSocket Client.
@@ -172,10 +160,10 @@ class RpcClient(Client):
             # If its an error response.
             if resp.is_error():
                 # The error is unexpected, so we need to raise an exception.
-                raise RuntimeError(
-                    f"Response '{resp.id}' contains error: {resp.error}")
-            # Set result to the future waiting for the response.
-            fut.set_result(resp)
+                fut.set_exception(error.RpcClientError(str(resp.error)))
+            else:
+                # Set result to the future waiting for the response.
+                fut.set_result(resp)
             # We are finished, so exit the function.
             return
         # Otherwise, everything is a notification because, as specified
@@ -219,6 +207,7 @@ class RpcClient(Client):
                             except Exception as e:
                                 # If an exception occurs, log it
                                 # instead of stopping the loop.
+                                # I expect it to handle validator exceptions.
                                 self.logger.error(
                                     f"Exception in the receiving loop: {e}")
                             # Shrink the buffer to where the decoder stopped.
@@ -270,7 +259,8 @@ class RpcClient(Client):
             # The future shouldn't expect an answer, so remove it.
             del self._seq2fut[req.id]
             # Raise custom client exception to simplify future extensibility.
-            raise RpcClientError("Failed to send Solana RPC request.") from e
+            raise error.RpcClientError(
+                "Failed to send Solana RPC request.") from e
         # Await the response from the receiving task.
         return await fut
 
@@ -283,15 +273,20 @@ class RpcClient(Client):
 
     async def logs_subscribe(
         self,
-        mentions: list[logssubscribe.Mention],
-        commitment: logssubscribe.Commitment
+        mentions_or_filter: list[logssubscribe.Mention] | logssubscribe.Filter,
+        commitment: transaction.Commitment
     ) -> jsonrpc20.Response:
         """
         Subscribe to transaction logs.
         """
         return await self._send_request(jsonrpc20.Request(
             method="logsSubscribe",
-            params=[{"mentions": mentions}, {"commitment": commitment}],
+            params=[
+                {"mentions": mentions_or_filter}
+                if isinstance(mentions_or_filter, list)
+                else mentions_or_filter,
+                {"commitment": commitment}
+            ],
             id=self._next_seq()
         ))
 
@@ -348,12 +343,12 @@ class RpcDispatcher(RpcClient):
         """
         try:
             # If the callback is not registered, skip execution.
-            if cb := self._method2cb.get(notif.method):
-                # Create an independent task for the method handler.
-                task = asyncio.create_task(cb(notif))
-                # Dangling tasks is prohibited by docs.
-                self._tasks.add(task)
-                task.add_done_callback(self._tasks.discard)
+            cb = self._method2cb[notif.method]
+            # Create an independent task for the method handler.
+            task = asyncio.create_task(cb(notif))
+            # Dangling tasks is prohibited by docs.
+            self._tasks.add(task)
+            task.add_done_callback(self._tasks.discard)
         except KeyError as e:
             # Its better to raise a custom exception to simplify their
             # extensibility in the future.
