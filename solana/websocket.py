@@ -141,13 +141,13 @@ class RpcClient(Client):
         # Initialize O(1) accesss storage for active tasks.
         self._tasks: set[asyncio.Task] = set()
 
-    def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
+    async def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
         """
         Abstract method that defines the JSON-RPC 2.0 notification callback.
         """
         pass
 
-    def _process_obj(self, obj: dict[str, Any]) -> None:
+    async def _process_obj(self, obj: dict[str, Any]) -> None:
         """
         Parse the received object and invoke the corresponding logic.
         """
@@ -174,7 +174,10 @@ class RpcClient(Client):
         elif "method" in obj:
             # Parse JSON-RPC 2.0 notification from the object and invoke
             # the notification callback.
-            self._notification_cb(jsonrpc20.Notification.model_validate(obj))
+            # There is no point in parallel processing of notifications here,
+            # as this can easily turn into task spam.
+            await self._notification_cb(
+                jsonrpc20.Notification.model_validate(obj))
         # If something unexpected happened, this should be impossible.
         else:
             # Impossible cases should be logged for sure.
@@ -205,7 +208,7 @@ class RpcClient(Client):
                             # Try decoding the raw buffer data into JSON.
                             obj, end = decoder.raw_decode(buffer)
                             try:
-                                self._process_obj(obj)
+                                await self._process_obj(obj)
                             except Exception as e:
                                 # If an exception occurs, log it
                                 # instead of stopping the loop.
@@ -397,26 +400,17 @@ class RpcDispatcher(RpcClient):
         super().__init__(*args, **kwargs)
         # Dictionary containing all notification handlers to be executed.
         self._method2cb: dict[str, NotificationCallback] = {}
-        # Initialize O(1) accesss storage for active tasks.
-        self._tasks: set[asyncio.Task] = set()
 
-    def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
+    async def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
         """
         Callback for the Solana JSON-RPC 2.0 notifications.
         """
-        try:
-            # If the callback is not registered, skip execution.
-            cb = self._method2cb[notif.method]
-            # Create an independent task for the method handler.
-            task = asyncio.create_task(cb(notif))
-            # Dangling tasks is prohibited by docs.
-            self._tasks.add(task)
-            task.add_done_callback(self._tasks.discard)
-        except KeyError as e:
-            # Its better to raise a custom exception to simplify their
-            # extensibility in the future.
-            raise RpcDispatcherError(
-                f"The '{notif.method}' notification remains unhandled.") from e
+        # If the callback is not registered, skip execution.
+        if cb := self._method2cb.get(notif.method):
+            await cb(notif)
+        else:
+            self.logger.warning(
+                f"The notification remains unhandled: {notif.method}")
 
     def set_notification_handler(
         self,
