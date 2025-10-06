@@ -3,14 +3,16 @@
 # file COPYING or https://opensource.org/license/mit/.
 
 from . import (
-    block, blocknotification, blocksubscribe, error, slotnotification,
-    transaction, http, jsonrpc20, logsnotification, logssubscribe, websocket
+    block, block_dict, blocknotification, blocksubscribe, error,
+    slotnotification, transaction, transaction_dict, http, jsonrpc20,
+    logsnotification, logssubscribe, websocket
 )
 
 # This one variable defines what to import when you want to import all.
-__all__ = ("block", "blocknotification", "blocksubscribe", "error",
-           "slotnotification", "transaction", "http", "jsonrpc20",
-           "logsnotification", "logssubscribe", "websocket")
+__all__ = ("block", "block_dict", "blocknotification", "blocksubscribe",
+           "error", "slotnotification", "transaction", "transaction_dict",
+           "http", "jsonrpc20", "logsnotification", "logssubscribe",
+           "websocket")
 
 # vim: set ts=4 sw=4 expandtab:
 

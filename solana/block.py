@@ -4,8 +4,10 @@
 
 import pydantic
 
-from . import transaction
+from typing import Any
 from enum import StrEnum
+
+from . import transaction
 
 
 class Encoding(StrEnum):
@@ -37,38 +39,79 @@ class Details(StrEnum):
     NONE = "none"
 
 
-class Object(pydantic.BaseModel):
+class Base(pydantic.BaseModel):
     """
-    Result object returned by RPC getBlock (full block including transactions).
+    The result of a `getBlock` RPC request.
+    This shape is a superset that accommodates different `transactionDetails`
+    and `encoding` options.
     """
-    # Block height (u64).
-    blockHeight: int = pydantic.Field(
-        description="Height of the block"
-    )
-
-    # Estimated production time (Unix timestamp).
-    blockTime: int = pydantic.Field(
-        description="Block production time (Unix timestamp)"
-    )
-
-    # Hash of this block (base-58).
+    # Current blockhash.
     blockhash: str = pydantic.Field(
-        description="Hash of this block"
+        description="Blockhash of this block"
     )
 
-    # Parent slot of this block.
-    parentSlot: int = pydantic.Field(
-        description="Parent slot number"
-    )
-
-    # Hash of the previous block.
+    # Previous blockhash.
     previousBlockhash: str = pydantic.Field(
-        description="Hash of the previous block"
+        description="Blockhash of the previous block"
     )
 
-    # List of transactions with metadata.
-    transactions: list[transaction.ObjectWithMeta] = pydantic.Field(
-        description="Transactions in this block (with metadata)"
+    # Slot in which the block was produced.
+    parentSlot: int = pydantic.Field(
+        description="Parent slot of this block"
+    )
+
+    # Optional block height (may be null on some clusters).
+    blockHeight: int | None = pydantic.Field(
+        default=None,
+        description="Block height, if available"
+    )
+
+    # Estimated Unix timestamp for the block (or null).
+    blockTime: int | None = pydantic.Field(
+        default=None,
+        description="Estimated Unix timestamp (or null)"
+    )
+
+    # Rewards earned in this block.
+    rewards: list[transaction.Reward] | None = pydantic.Field(
+        default=None,
+        description="Validator and fee rewards for this block (or null)"
+    )
+
+    # If `transactionDetails="signatures"`, only transaction signatures
+    # are returned.
+    signatures: list[str] | None = pydantic.Field(
+        default=None,
+        description="Signatures when transactionDetails='signatures'"
+    )
+
+
+class Json(Base):
+    """
+    Wrapper combining a `json`-encoded transaction with its execution metadata.
+    """
+    # If `transactionDetails` is 'none', 'full' or 'accounts', transactions
+    # are returned. We provide union slots for either JSON or JSON_PARSED
+    # encodings.
+    transactions: list[transaction.Json] | None = pydantic.Field(
+        default=None,
+        description="Transactions in this block, shape depends on `encoding` "
+                    "and `transactionDetails`"
+    )
+
+
+class JsonParsed(Base):
+    """
+    Wrapper combining a `jsonParsed`-encoded transaction with its
+    execution metadata.
+    """
+    # If `transactionDetails` is 'none', 'full' or 'accounts', transactions
+    # are returned. We provide union slots for either JSON or JSON_PARSED
+    # encodings.
+    transactions: list[transaction.JsonParsed] | None = pydantic.Field(
+        default=None,
+        description="Transactions in this block, shape depends on `encoding` "
+                    "and `transactionDetails`"
     )
 
 # vim: set ts=4 sw=4 expandtab:

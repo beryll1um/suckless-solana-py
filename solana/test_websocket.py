@@ -12,7 +12,7 @@ from .websocket import Client, RpcClient, RpcDispatcher
 from asyncio import Event, sleep
 
 # Types used for Solana RPC WebSocket `logsSubscribe` arguments.
-from . import block, transaction, logssubscribe
+from . import block, logssubscribe
 
 
 @pytest.mark.asyncio
@@ -40,7 +40,7 @@ async def test_logs_subscribe_unsubscribe() -> None:
     # Define the Solana RPC WebSocket client connection primitive.
     rpc = RpcClient()
     # Connect to the Solana Devnet RPC WebSocket.
-    await rpc.start(uri="wss://api.mainnet-beta.solana.com")
+    await rpc.start(uri="wss://api.devnet.solana.com")
     # Subscribe to account logs and await the response.
     resp = await rpc.logs_subscribe(
         [logssubscribe.Mention("11111111111111111111111111111111")],

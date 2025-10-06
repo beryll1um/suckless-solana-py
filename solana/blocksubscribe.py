@@ -3,16 +3,15 @@
 # file COPYING or https://opensource.org/license/mit/.
 
 from typing import NewType
+from enum import StrEnum
 
-Filter = NewType("Filter", str)
-"""
-Type representing criteria for the logs to receive results.
-"""
 
-All = Filter("all")
-"""
-Constant representing subscription to all transactions in block.
-"""
+class Filter(StrEnum):
+    """
+    Type representing criteria for the logs to receive results.
+    """
+    ALL = "all"
+
 
 Mention = NewType("Mention", str)
 """

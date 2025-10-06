@@ -13,16 +13,14 @@ class Client[T]:
     """
     Implementation of the HTTP Client.
     """
-    __slots__ = ("_uri", "_user_agent", "_timeout")
+    __slots__ = ("_user_agent", "_timeout")
 
     def __init__(
         self,
-        uri: str,
         *,
         user_agent: str = "suckless-solana-py",
         timeout: float = 30.0
     ) -> None:
-        self._uri = uri
         self._user_agent = user_agent
         self._timeout = timeout
 
@@ -60,12 +58,13 @@ class RpcClient(Client["RpcClient"]):
     """
     Implementation of the Solana RPC HTTP Client.
     """
-    def __init__(self, *args, **kwargs) -> None:
+    def __init__(self, uri: str, **kwargs) -> None:
         """
         Initialize all necessary control structures.
         """
         # Call the base class initializer to set up its control structures.
-        super().__init__(*args, **kwargs)
+        super().__init__(**kwargs)
+        self._uri = uri
 
     async def _send_request(
         self,

@@ -2,24 +2,17 @@
 # Distributed under the MIT software license, see the accompanying
 # file COPYING or https://opensource.org/license/mit/.
 
+from enum import StrEnum
 from typing import NewType
 
-Filter = NewType("Filter", str)
-"""
-Type representing criteria for the logs to receive results.
-"""
 
-All = Filter("all")
-"""
-Constant representing subscription to all transactions
-except for simple vote transactions.
-"""
+class Filter(StrEnum):
+    """
+    Type representing criteria for the logs to receive results.
+    """
+    ALL = "all"
+    ALL_WITH_VOTES = "allWithVotes"
 
-AllWithVotes = Filter("allWithVotes")
-"""
-Constant representing subscribtion to all transactions,
-including simple vote transactions.
-"""
 
 Mention = NewType("Mention", str)
 """
