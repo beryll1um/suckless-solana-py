@@ -23,7 +23,7 @@ async def test_start_disconnect() -> None:
     # Define the WebSocket client connection primitive.
     ws = Client()
     # Connect to the Solana Devnet RPC WebSocket.
-    await ws.start(uri="wss://api.devnet.solana.com")
+    await ws.connect(uri="wss://api.devnet.solana.com")
     # Verify that the client is successfully connected.
     assert ws.is_connected()
     # Disconnect from the WebSocket.

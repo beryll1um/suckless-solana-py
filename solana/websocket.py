@@ -43,7 +43,7 @@ class Client:
         # Logger used to notify about the client state.
         self._logger: logging.Logger | None = None
 
-    async def start(
+    async def connect(
         self,
         *args,
         logger: logging.Logger | None = None,
@@ -126,7 +126,7 @@ class RpcClient(Client):
     """
     Implementation of the Solana RPC WebSocket Client.
     """
-    __slots__ = ("_seq", "_seq2fut", "_tasks")
+    __slots__ = ("_seq", "_recv_task", "_seq2fut")
 
     def __init__(self, *args, **kwargs) -> None:
         """
@@ -138,8 +138,8 @@ class RpcClient(Client):
         self._seq = 0
         # Map that relates request sequence numbers with their futures.
         self._seq2fut: dict[int | str, asyncio.Future[jsonrpc20.Response]] = {}
-        # Initialize O(1) accesss storage for active tasks.
-        self._tasks: set[asyncio.Task] = set()
+        # Reference to the receiving data task.
+        self._recv_task: asyncio.Task | None = None
 
     async def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
         """
@@ -236,13 +236,23 @@ class RpcClient(Client):
         """
         # Forward startup arguments to the original startup method
         # of the WebSocket client base class.
-        await super().start(*args, **kwargs)
-        # If the connection is successful, create a listener
+        await super().connect(*args, **kwargs)
+        # If the connection is successful, create a receiver
         # to read WebSocket messages.
-        task = asyncio.create_task(self._recv_loop())
-        # Dangling tasks is prohibited by docs.
-        self._tasks.add(task)
-        task.add_done_callback(self._tasks.discard)
+        self._recv_task = asyncio.create_task(self._recv_loop())
+
+    @property
+    def finalized(
+        self, loop: asyncio.AbstractEventLoop | None = None
+    ) -> asyncio.Future[None]:
+        """
+        Future that resolves when the receiving loop is completed,
+        either by the client or the server.
+        """
+        if self._recv_task is None:
+            raise error.RpcClientError(
+                "Unable to wait for unstarted task to finalize.")
+        return self._recv_task
 
     async def _send_request(
         self,
