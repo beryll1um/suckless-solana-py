@@ -53,6 +53,8 @@ class Client:
         Forward WebSocket connection instance creation arguments
         to the connection initializer.
         """
+        if self.is_connected():
+            raise ClientError("Unable to connect twice, disconnect first.")
         # Use a custom logger or the default logger if none is provided.
         self._logger = logger or logging.getLogger(DEFAULT_CLIENT_LOGGER_NAME)
         try:
@@ -106,6 +108,11 @@ class Client:
         """
         Return `True` if the client is connected.
         """
+        # There may be no connection object, so this means
+        # we are not connected ...
+        if self._conn is None:
+            return False
+        # ... otherwise check connection state.
         return self.connection.state in (
             websockets.State.CONNECTING, websockets.State.OPEN)
 
@@ -122,11 +129,22 @@ class Client:
             raise ClientError("Failed to finalize connection.") from e
 
 
+NotificationHandler = Callable[[jsonrpc20.Notification], None]
+"""
+Handler for Solana JSON-RPC 2.0 WebSocket notifications.
+"""
+
+
+# Prevents the exponent from being calculated each time
+# a sequence identifier is generated.
+_ID_MOD = 2**31
+
+
 class RpcClient(Client):
     """
     Implementation of the Solana RPC WebSocket Client.
     """
-    __slots__ = ("_seq", "_recv_task", "_seq2fut")
+    __slots__ = ("_id", "_task", "_id2fut", "_sub2handler")
 
     def __init__(self, *args, **kwargs) -> None:
         """
@@ -135,19 +153,15 @@ class RpcClient(Client):
         # Call the base class initializer to set up its control structures.
         super().__init__(*args, **kwargs)
         # Incremental identifier used to indicate each next request sent.
-        self._seq = 0
-        # Map that relates request sequence numbers with their futures.
-        self._seq2fut: dict[int | str, asyncio.Future[jsonrpc20.Response]] = {}
+        self._id = 0
         # Reference to the receiving data task.
-        self._recv_task: asyncio.Task | None = None
+        self._task: asyncio.Task | None = None
+        # Map that relates request sequence numbers with their futures.
+        self._id2fut: dict[int | str, asyncio.Future[jsonrpc20.Response]] = {}
+        # Map that relates subscription IDs with their callbacks.
+        self._sub2handler: dict[int, NotificationHandler] = {}
 
-    async def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
-        """
-        Abstract method that defines the JSON-RPC 2.0 notification callback.
-        """
-        pass
-
-    async def _process_obj(self, obj: dict[str, Any]) -> None:
+    def _process_obj(self, obj: dict[str, Any]) -> None:
         """
         Parse the received object and invoke the corresponding logic.
         """
@@ -158,7 +172,7 @@ class RpcClient(Client):
             # Parse JSON-RPC 2.0 response from the object.
             resp = jsonrpc20.Response.model_validate(obj)
             # Delete it from the dictionary as it has already been utilized.
-            fut = self._seq2fut.pop(resp.id)
+            fut = self._id2fut.pop(resp.id)
             # If its an error response.
             if resp.is_error():
                 # The error is unexpected, so we need to raise an exception.
@@ -176,8 +190,21 @@ class RpcClient(Client):
             # the notification callback.
             # There is no point in parallel processing of notifications here,
             # as this can easily turn into task spam.
-            await self._notification_cb(
-                jsonrpc20.Notification.model_validate(obj))
+            notif = jsonrpc20.Notification.model_validate(obj)
+            # As far as I know, a dictionary is always required.
+            if not isinstance(notif.params, dict):
+                raise error.RpcClientError(
+                    "Unexpected JSON-RPC 2.0 notification format: "
+                    "'params' isn't a structured type")
+            # Also there is should be a subscription ID
+            # to identify notification.
+            if "subscription" not in notif.params:
+                raise error.RpcClientError(
+                    "Unexpected JSON-RPC 2.0 notification format: "
+                    "'params' doesn't contain the field 'subscription'")
+            # If such a handler is still registered, try to execute it.
+            if handler := self._sub2handler.get(notif.params["subscription"]):
+                handler(notif)
         # If something unexpected happened, this should be impossible.
         else:
             # Impossible cases should be logged for sure.
@@ -208,7 +235,7 @@ class RpcClient(Client):
                             # Try decoding the raw buffer data into JSON.
                             obj, end = decoder.raw_decode(buffer)
                             try:
-                                await self._process_obj(obj)
+                                self._process_obj(obj)
                             except Exception as e:
                                 # If an exception occurs, log it
                                 # instead of stopping the loop.
@@ -232,14 +259,21 @@ class RpcClient(Client):
     async def start(self, *args, **kwargs) -> None:
         """
         Forward WebSocket connection instance creation arguments
-        to the connection initializer.
+        to the connection initializer and create receiving loop task.
         """
-        # Forward startup arguments to the original startup method
-        # of the WebSocket client base class.
-        await super().connect(*args, **kwargs)
-        # If the connection is successful, create a receiver
-        # to read WebSocket messages.
-        self._recv_task = asyncio.create_task(self._recv_loop())
+        # Its possible that the user may want to connect first and
+        # start RPC receiving loop only after.
+        if not super().is_connected():
+            # Forward startup arguments to the original connection method
+            # of the WebSocket client base class.
+            await super().connect(*args, **kwargs)
+        # However, only one instance of a task should be allowed.
+        if self._task is not None and not self._task.done():
+            raise error.RpcClientError(
+                "Only one instance of the receiving loop is allowed.")
+        # If the connection is established and the task does not exist or
+        # has completed, a new one can be created.
+        self._task = asyncio.create_task(self._recv_loop())
 
     @property
     def finalized(
@@ -249,14 +283,13 @@ class RpcClient(Client):
         Future that resolves when the receiving loop is completed,
         either by the client or the server.
         """
-        if self._recv_task is None:
+        if self._task is None:
             raise error.RpcClientError(
                 "Unable to wait for unstarted task to finalize.")
-        return self._recv_task
+        return self._task
 
     async def _send_request(
-        self,
-        req: jsonrpc20.Request
+        self, req: jsonrpc20.Request
     ) -> jsonrpc20.Response:
         """
         Send an RPC request and wait for the response.
@@ -264,7 +297,7 @@ class RpcClient(Client):
         # Instantiate a future to wait for the subscription response.
         fut = asyncio.Future[jsonrpc20.Response]()
         # Assign this Future to the sequence number for this RPC request.
-        self._seq2fut[req.id] = fut
+        self._id2fut[req.id] = fut
         # This connection `send` method may fail due to connectivity issues,
         # so we need to handle it anyway.
         try:
@@ -272,179 +305,143 @@ class RpcClient(Client):
             await self.connection.send(req.model_dump_json())
         except Exception as e:
             # The future shouldn't expect an answer, so remove it.
-            del self._seq2fut[req.id]
+            del self._id2fut[req.id]
             # Raise custom client exception to simplify future extensibility.
             raise error.RpcClientError(
                 "Failed to send Solana RPC request.") from e
         # Await the response from the receiving task.
         return await fut
 
-    def _next_seq(self) -> int:
+    def _next_id(self) -> int:
         """
         Increment the sequence number by one and return it.
         """
-        self._seq += 1
-        return self._seq
+        self._id = (self._id % _ID_MOD) + 1
+        return self._id
+
+    async def _subscribe(
+        self, req: jsonrpc20.Request, handler: NotificationHandler
+    ) -> int:
+        """
+        Send an RPC subscribe request and wait for the response.
+        """
+        resp = await self._send_request(req)
+        # If the response result is not a subscription integer,
+        # we need to raise an exception.
+        if not isinstance(resp.result, int):
+            raise TypeError("JSON-RPC 2.0 subscribe request must be responded "
+                            "to with an integer subscription ID.")
+        # Bind notification callback for obtained subscription ID.
+        self._sub2handler[resp.result] = handler
+        return resp.result
+
+    async def _unsubscribe(self, method: str, sub: int) -> None:
+        """
+        Build and send RPC unsubscribe request, wait for the response and
+        delete appropriate notification handler.
+        """
+        resp = await self._send_request(jsonrpc20.Request(
+            method=method, params=[sub], id=self._next_id()
+        ))
+        # If the response result is not a subscription integer,
+        # we need to raise an exception.
+        if not isinstance(resp.result, bool):
+            raise TypeError("JSON-RPC 2.0 subscribe request must be responded "
+                            "to with a boolean success indicator.")
+        # I'm not sure is it possible at all, but better to follow spec.
+        if not resp.result:
+            raise error.RpcClientError(
+                f"Failed to unsubscribe from '{sub}' subscription ID "
+                "notification.")
+        # Unbind notification callback for specific subscription ID.
+        del self._sub2handler[sub]
 
     async def logs_subscribe(
         self,
+        handler: NotificationHandler,
         mentions_or_filter: list[logssubscribe.Mention] | logssubscribe.Filter,
         commitment: block.Commitment
-    ) -> jsonrpc20.Response:
+    ) -> int:
         """
         Subscribe to transaction logs.
         """
-        return await self._send_request(jsonrpc20.Request(
-            method="logsSubscribe",
-            params=[
-                {"mentions": mentions_or_filter}
-                if isinstance(mentions_or_filter, list)
-                else mentions_or_filter,
-                {"commitment": commitment}
-            ],
-            id=self._next_seq()
-        ))
+        return await self._subscribe(
+            jsonrpc20.Request(
+                method="logsSubscribe",
+                params=[
+                    {"mentions": mentions_or_filter}
+                    if isinstance(mentions_or_filter, list)
+                    else mentions_or_filter,
+                    {"commitment": commitment}
+                ],
+                id=self._next_id()
+            ),
+            handler
+        )
 
-    async def logs_unsubscribe(self, subscription: int) -> jsonrpc20.Response:
+    async def logs_unsubscribe(self, sub: int) -> None:
         """
         Unsubscribe from transaction logs.
         """
-        return await self._send_request(jsonrpc20.Request(
-            method="logsUnsubscribe",
-            params=[subscription],
-            id=self._next_seq()
-        ))
+        await self._unsubscribe("logsUnsubscribe", sub)
 
     async def block_subscribe(
         self,
+        handler: NotificationHandler,
         mentions_or_filter:
             list[blocksubscribe.Mention] | blocksubscribe.Filter,
-        commitment: block.Commitment,
+        commitment: block.Commitment = block.Commitment.FINALIZED,
         encoding: block.Encoding = block.Encoding.JSON,
         transaction_details: block.Details = block.Details.FULL,
-        rewards: bool = False
-    ) -> jsonrpc20.Response:
+        rewards: bool = False,
+    ) -> int:
         """
-        Subscribe to block logs.
+        Subscribe to block notifications.
         """
-        return await self._send_request(jsonrpc20.Request(
-            method="blockSubscribe",
-            params=[
-                {"mentionsAccountOrProgram": mentions_or_filter}
-                if isinstance(mentions_or_filter, list)
-                else mentions_or_filter,
-                {
-                    # The commitment describes how finalized a block
-                    # is at that point in time.
-                    "commitment": commitment,
-                    "encoding": encoding,
-                    "transactionDetails": transaction_details,
-                    "showRewards": rewards
-                }
-            ],
-            id=self._next_seq()
-        ))
+        return await self._subscribe(
+            jsonrpc20.Request(
+                method="blockSubscribe",
+                params=[
+                    {"mentionsAccountOrProgram": mentions_or_filter}
+                    if isinstance(mentions_or_filter, list)
+                    else mentions_or_filter,
+                    {
+                        # The commitment describes how finalized a block
+                        # is at that point in time.
+                        "commitment": commitment,
+                        "encoding": encoding,
+                        "transactionDetails": transaction_details,
+                        "showRewards": rewards
+                    }
+                ],
+                id=self._next_id()
+            ),
+            handler
+        )
 
-    async def block_unsubscribe(self, subscription: int) -> jsonrpc20.Response:
+    async def block_unsubscribe(self, sub: int) -> None:
         """
         Unsubscribe from block notifications.
         """
-        return await self._send_request(jsonrpc20.Request(
-            method="blockUnsubscribe",
-            params=[subscription],
-            id=self._next_seq()
-        ))
+        await self._unsubscribe("blockUnsubscribe", sub)
 
-    async def slot_subscribe(self) -> jsonrpc20.Response:
+    async def slot_subscribe(self, handler: NotificationHandler) -> int:
         """
-        Subscribe to receive notification anytime a slot is processed
-        by the validator.
+        Subscribe to slot notifications.
         """
-        return await self._send_request(jsonrpc20.Request(
-            method="slotSubscribe",
-            id=self._next_seq()
-        ))
+        return await self._subscribe(
+            jsonrpc20.Request(
+                method="slotSubscribe",
+                id=self._next_id()
+            ),
+            handler
+        )
 
-    async def slot_unsubscribe(self, subscription: int) -> jsonrpc20.Response:
+    async def slot_unsubscribe(self, sub: int) -> None:
         """
-        Subscribe to receive notification anytime a slot is processed
-        by the validator.
+        Unsubscribe from slot notifications.
         """
-        return await self._send_request(jsonrpc20.Request(
-            method="slotUnsubscribe",
-            params=[subscription],
-            id=self._next_seq()
-        ))
-
-
-NotificationCallback = Callable[
-    [jsonrpc20.Notification], Coroutine[None, None, None]]
-"""
-Handler for Solana JSON-RPC 2.0 WebSocket notifications.
-"""
-
-
-class RpcDispatcherError(Exception):
-    """
-    Exception for the dispatcher of the Solana RPC WebSocket Client.
-    """
-
-    def __init__(self, msg: str, **kwds) -> None:
-        """
-        Initialize with an error message.
-        """
-        super().__init__(msg, **kwds)
-
-
-class RpcDispatcher(RpcClient):
-    """
-    Implementation of a dispatcher for the Solana RPC WebSocket Client.
-    """
-    __slots__ = ("_method2cb", "_tasks")
-
-    def __init__(self, *args, **kwargs) -> None:
-        """
-        Initialize all necessary control structures.
-        """
-        # Call the base class initializer to set up its control structures.
-        super().__init__(*args, **kwargs)
-        # Dictionary containing all notification handlers to be executed.
-        self._method2cb: dict[str, NotificationCallback] = {}
-
-    async def _notification_cb(self, notif: jsonrpc20.Notification) -> None:
-        """
-        Callback for the Solana JSON-RPC 2.0 notifications.
-        """
-        # If the callback is not registered, skip execution.
-        if cb := self._method2cb.get(notif.method):
-            await cb(notif)
-        else:
-            self.logger.warning(
-                f"The notification remains unhandled: {notif.method}")
-
-    def set_notification_handler(
-        self,
-        method: str,
-        cb: NotificationCallback
-    ) -> None:
-        """
-        Add a handler for a specific notification callback.
-        """
-        # Add the handler to the set if its not already present.
-        self._method2cb[method] = cb
-
-    def unset_notification_handler(self, method: str) -> None:
-        """
-        Remove a handler for a specific notification callback.
-        """
-        try:
-            # Try to remove the handler from the "logsNotification" set.
-            del self._method2cb[method]
-        except KeyError as e:
-            # Its better to raise a custom exception to simplify their
-            # extensibility in the future.
-            raise RpcDispatcherError(
-                "This method isn't registered yet.") from e
+        await self._unsubscribe("slotUnsubscribe", sub)
 
 # vim: set ts=4 sw=4 expandtab:
 
