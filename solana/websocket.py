@@ -57,14 +57,9 @@ class Client:
             raise ClientError("Unable to connect twice, disconnect first.")
         # Use a custom logger or the default logger if none is provided.
         self._logger = logger or logging.getLogger(DEFAULT_CLIENT_LOGGER_NAME)
-        try:
-            # Invoke connection establishment using the "websockets" library.
-            self._conn = await websockets.connect(*args, **kwargs,
-                                                  logger=self._logger)
-        except Exception as e:
-            # Its better to raise a custom exception to simplify their
-            # extensibility in the future.
-            raise ClientError("Error connecting to server.") from e
+        # Invoke connection establishment using the "websockets" library.
+        self._conn = await websockets.connect(*args, **kwargs,
+                                              logger=self._logger)
 
     @property
     def logger(self) -> logging.Logger:
@@ -77,7 +72,7 @@ class Client:
         if self._logger is None:
             # Its better to raise a custom exception to simplify their
             # extensibility in the future.
-            raise ClientError("No initialized logger identified.")
+            raise ClientError("No initialized logger identified")
         # Return internal logger instance.
         return self._logger
 
@@ -92,7 +87,7 @@ class Client:
         if self._conn is None:
             # Its better to raise a custom exception to simplify their
             # extensibility in the future.
-            raise ClientError("No active connection identified.")
+            raise ClientError("No active connection identified")
         # Return internal client connection.
         return self._conn
 
@@ -121,12 +116,8 @@ class Client:
         Forward the WebSocket connection finalization arguments
         to the connection finalizer.
         """
-        try:
-            # Invoke connection finalization with the RPC WebSocket.
-            await self.connection.close(*args, **kwargs)
-        except Exception as e:
-            # Raise custom client exception to simplify future extensibility.
-            raise ClientError("Failed to finalize connection.") from e
+        # Invoke connection finalization with the RPC WebSocket.
+        await self.connection.close(*args, **kwargs)
 
 
 NotificationHandler = Callable[[jsonrpc20.Notification], None]
@@ -205,10 +196,9 @@ class RpcClient(Client):
             # If such a handler is still registered, try to execute it.
             if handler := self._sub2handler.get(notif.params["subscription"]):
                 handler(notif)
-        # If something unexpected happened, this should be impossible.
         else:
             # Impossible cases should be logged for sure.
-            raise ValueError("Unexpected format of JSON-RPC 2.0 message.")
+            raise ValueError("Unexpected format of JSON-RPC 2.0 message")
 
     async def _recv_loop(self) -> None:
         """
@@ -220,7 +210,6 @@ class RpcClient(Client):
         buffer = ""
         # This try-except block will handle the WebSocket streaming receiver.
         try:
-            # Lets start reading the WebSocket incoming data chunk by chunk.
             while True:
                 # Read the first chunk from the WebSocket.
                 async for chunk in self.connection.recv_streaming(decode=True):
@@ -237,14 +226,11 @@ class RpcClient(Client):
                             try:
                                 self._process_obj(obj)
                             except Exception as e:
-                                # If an exception occurs, log it
-                                # instead of stopping the loop.
-                                # I expect it to handle validator exceptions.
                                 self.logger.error(
                                     f"Exception in the receiving loop: {e}")
                             # Shrink the buffer to where the decoder stopped.
                             buffer = buffer[end:]
-                        # Decoding failed, but without panic.
+                        # Decoding failed, but no panic.
                         # We just need to read another chunk of data
                         # to fill the missing part.
                         except JSONDecodeError:
@@ -303,13 +289,10 @@ class RpcClient(Client):
         try:
             # Build JSON-RPC 2.0 request with method-specific parameters.
             await self.connection.send(req.model_dump_json())
-        except Exception as e:
+        except Exception:
             # The future shouldn't expect an answer, so remove it.
             del self._id2fut[req.id]
-            # Raise custom client exception to simplify future extensibility.
-            raise error.RpcClientError(
-                "Failed to send Solana RPC request.") from e
-        # Await the response from the receiving task.
+            raise
         return await fut
 
     def _next_id(self) -> int:

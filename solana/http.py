@@ -87,7 +87,7 @@ class RpcClient(Client["RpcClient"]):
             return jsonrpc20.Response.model_validate_json(resp.text)
         except Exception as exc:
             raise error.RpcClientError(
-                "Unexpected format of JSON-RPC 2.0 response.")
+                "Unexpected format of JSON-RPC 2.0 response") from exc
 
     async def get_transaction(
         self,
